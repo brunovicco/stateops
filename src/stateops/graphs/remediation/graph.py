@@ -8,11 +8,12 @@ from langgraph.types import Command, Overwrite, interrupt
 from stateops.application.approvals import apply_approval, parse_approval
 from stateops.application.idempotency import remediation_idempotency_key
 from stateops.application.ports.clock import Clock
-from stateops.application.ports.reasoner import IncidentReasoner
+from stateops.application.ports.reasoner import IncidentReasoner, IncidentReasoningError
 from stateops.application.ports.remediation import RemediationExecutor
 from stateops.domain.enums import ActionKind, ApprovalOutcome, IncidentPhase, Severity
 from stateops.domain.transitions import transition
 from stateops.graphs.events import timeline_event
+from stateops.graphs.failures import failed_reasoning_state
 from stateops.graphs.state import IncidentState
 
 
@@ -29,8 +30,19 @@ class RemediationNodes:
 
     async def propose_actions(self, state: IncidentState) -> IncidentState:
         """Generate allowlisted candidates after evidence synthesis or replan."""
+        try:
+            actions = await self._reasoner.propose_remediations(
+                state["incident"], state["root_cause"]
+            )
+        except IncidentReasoningError as exc:
+            return failed_reasoning_state(
+                self._clock,
+                state,
+                node="propose_actions",
+                error=exc,
+                discriminator=str(state["attempts"]),
+            )
         phase = transition(state["phase"], IncidentPhase.PLANNING)
-        actions = await self._reasoner.propose_remediations(state["incident"], state["root_cause"])
         return IncidentState(
             phase=phase,
             candidate_actions=list(actions),
@@ -178,7 +190,18 @@ def build_remediation_graph(
     builder.add_node("execute_action", nodes.execute_action)
     builder.add_node("replan", nodes.replan)
     builder.add_edge(START, "propose_actions")
-    builder.add_edge("propose_actions", "select_action")
+    builder.add_conditional_edges(
+        "propose_actions",
+        _after_proposal,
+        {"select_action": "select_action", END: END},
+    )
     builder.add_edge("select_action", "human_approval")
     builder.add_edge("execute_action", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def _after_proposal(state: IncidentState) -> str:
+    """Stop the subgraph when action generation failed."""
+    if IncidentPhase(state["phase"]) is IncidentPhase.FAILED:
+        return END
+    return "select_action"

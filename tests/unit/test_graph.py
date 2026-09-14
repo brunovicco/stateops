@@ -4,15 +4,26 @@ import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from langgraph.types import Command
 
 from stateops.adapters.incidents.synthetic_signals import SyntheticIncidentSignals
 from stateops.adapters.llm.deterministic import DeterministicIncidentReasoner
 from stateops.adapters.persistence.checkpointer import memory_checkpointer
 from stateops.adapters.remediation.simulated_executor import SimulatedRemediationExecutor
+from stateops.application.ports.reasoner import IncidentReasoningError
 from stateops.application.runtime_models import RunResult
 from stateops.domain.enums import IncidentPhase
-from stateops.domain.models import ExecutionResult, IncidentRecord, RootCause
+from stateops.domain.models import (
+    Evidence,
+    ExecutionResult,
+    Hypothesis,
+    IncidentContext,
+    IncidentRecord,
+    RemediationAction,
+    RootCause,
+    WorkflowError,
+)
 from stateops.graphs.incident_graph import build_incident_graph
 from stateops.graphs.remediation.graph import build_remediation_graph
 from stateops.graphs.runtime import GraphIncidentRuntime
@@ -29,6 +40,45 @@ class FakeClock:
         value = self._current
         self._current += timedelta(milliseconds=1)
         return value
+
+
+class FailingReasoner(DeterministicIncidentReasoner):
+    """Raise a metadata-safe failure at one selected reasoning stage."""
+
+    def __init__(self, stage: str) -> None:
+        self._stage = stage
+
+    def _raise_if_selected(self, stage: str) -> None:
+        if self._stage == stage:
+            raise IncidentReasoningError(
+                "reasoning failed",
+                code=f"{stage}_failed",
+                retryable=stage == "investigate",
+            )
+
+    async def generate_hypotheses(
+        self, incident: IncidentRecord, context: IncidentContext
+    ) -> tuple[Hypothesis, ...]:
+        self._raise_if_selected("generate")
+        return await super().generate_hypotheses(incident, context)
+
+    async def investigate(
+        self, incident: IncidentRecord, context: IncidentContext, hypothesis: Hypothesis
+    ) -> Evidence:
+        self._raise_if_selected("investigate")
+        return await super().investigate(incident, context, hypothesis)
+
+    async def synthesize(
+        self, hypotheses: tuple[Hypothesis, ...], evidence: tuple[Evidence, ...]
+    ) -> RootCause:
+        self._raise_if_selected("synthesize")
+        return await super().synthesize(hypotheses, evidence)
+
+    async def propose_remediations(
+        self, incident: IncidentRecord, root_cause: RootCause
+    ) -> tuple[RemediationAction, ...]:
+        self._raise_if_selected("propose")
+        return await super().propose_remediations(incident, root_cause)
 
 
 def _incident() -> IncidentRecord:
@@ -85,6 +135,24 @@ def test_parent_graph_fans_out_pauses_resumes_and_persists_history() -> None:
         replayed = await runtime.replay("INC-100", before_verification.checkpoint_id)
         assert replayed.values["phase"] is IncidentPhase.RESOLVED
         assert executor.execution_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_value_stream_ends_with_the_persisted_interrupt_state() -> None:
+    async def scenario() -> None:
+        runtime, _ = _runtime()
+
+        snapshots = [
+            snapshot async for snapshot in runtime.stream_values("INC-STREAM", _incident())
+        ]
+
+        assert snapshots
+        assert snapshots[-1]["phase"] is IncidentPhase.WAITING_APPROVAL
+        evidence = snapshots[-1]["evidence"]
+        assert isinstance(evidence, list)
+        assert len(evidence) == 3
+        assert snapshots[-1]["selected_action"] is not None
 
     asyncio.run(scenario())
 
@@ -153,5 +221,32 @@ def test_replaying_effect_node_uses_idempotency_ledger() -> None:
         replayed = await graph.ainvoke(None, before_effect.config)
         assert executor.execution_count == 1
         assert replayed["execution_result"].duplicate
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stage", ["generate", "investigate", "synthesize", "propose"])
+def test_reasoning_failures_become_terminal_serializable_state(stage: str) -> None:
+    async def scenario() -> None:
+        clock = FakeClock()
+        graph = build_incident_graph(
+            reasoner=FailingReasoner(stage),
+            signals=SyntheticIncidentSignals(),
+            executor=SimulatedRemediationExecutor(clock),
+            clock=clock,
+            checkpointer=memory_checkpointer(),
+        )
+        runtime = GraphIncidentRuntime(graph)
+
+        result = await runtime.start(f"INC-FAILED-{stage}", _incident())
+
+        assert not result.interrupted
+        assert result.values["phase"] is IncidentPhase.FAILED
+        errors = result.values["errors"]
+        assert isinstance(errors, list)
+        assert errors
+        assert all(isinstance(error, WorkflowError) for error in errors)
+        assert {error.category for error in errors} == {f"{stage}_failed"}
+        assert await runtime.history(f"INC-FAILED-{stage}")
 
     asyncio.run(scenario())

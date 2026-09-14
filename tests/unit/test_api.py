@@ -117,6 +117,27 @@ def test_api_drives_incident_approval_history_and_time_travel() -> None:
         assert invalid.status_code == 422
 
 
+def test_operator_console_is_local_packaged_and_csp_protected() -> None:
+    with TestClient(create_app(runtime=FakeRuntime())) as client:
+        page = client.get("/ui")
+        assert page.status_code == 200
+        assert page.headers["content-type"].startswith("text/html")
+        assert page.headers["content-security-policy"].startswith("default-src 'none'")
+        assert page.headers["x-content-type-options"] == "nosniff"
+        assert "StateOps Control Room" in page.text
+        assert '<script src="/ui/assets/app.js" defer></script>' in page.text
+
+        stylesheet = client.get("/ui/assets/app.css")
+        assert stylesheet.status_code == 200
+        assert stylesheet.headers["content-type"].startswith("text/css")
+
+        script = client.get("/ui/assets/app.js")
+        assert script.status_code == 200
+        assert "innerHTML" not in script.text
+        assert "incidents/${encodeURIComponent(incidentId)}/approval" in script.text
+        assert "URLSearchParams" in script.text
+
+
 def test_api_validates_incidents_and_streams_v3_value_projection_as_sse() -> None:
     with TestClient(create_app(runtime=FakeRuntime())) as client:
         invalid = _payload()

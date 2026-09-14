@@ -74,6 +74,20 @@ def _after_verification(state: IncidentState) -> Literal["remediation"] | str:
     return END
 
 
+def _after_investigation(state: IncidentState) -> Literal["remediation"] | str:
+    """Stop the parent graph when the investigation failed."""
+    if IncidentPhase(state["phase"]) is IncidentPhase.FAILED:
+        return END
+    return "remediation"
+
+
+def _after_remediation(state: IncidentState) -> Literal["verification"] | str:
+    """Stop the parent graph when remediation planning failed."""
+    if IncidentPhase(state["phase"]) is IncidentPhase.FAILED:
+        return END
+    return "verification"
+
+
 def build_incident_graph(
     *,
     reasoner: IncidentReasoner,
@@ -97,8 +111,16 @@ def build_incident_graph(
     builder.add_edge(START, "enrich")
     builder.add_edge("enrich", "classify")
     builder.add_edge("classify", "investigation")
-    builder.add_edge("investigation", "remediation")
-    builder.add_edge("remediation", "verification")
+    builder.add_conditional_edges(
+        "investigation",
+        _after_investigation,
+        {"remediation": "remediation", END: END},
+    )
+    builder.add_conditional_edges(
+        "remediation",
+        _after_remediation,
+        {"verification": "verification", END: END},
+    )
     builder.add_conditional_edges(
         "verification",
         _after_verification,

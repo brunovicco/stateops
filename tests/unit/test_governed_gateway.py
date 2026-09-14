@@ -8,13 +8,15 @@ from typing import Any, cast
 
 import pytest
 from governed_llm_gateway_client import GatewayClient
+from governed_llm_gateway_client.errors import GatewayTransportError
+from governed_llm_gateway_contracts import ExecutionStatus, GatewayError, StructuredOutputSchema
 
 from stateops.adapters.llm.governed_gateway import (
     GatewayReasoningError,
     GovernedGatewayIncidentReasoner,
 )
 from stateops.domain.enums import ActionKind
-from stateops.domain.models import IncidentContext, IncidentRecord, Signal
+from stateops.domain.models import IncidentContext, IncidentRecord, RootCause, Signal
 
 
 class FakeGatewayClient:
@@ -27,7 +29,11 @@ class FakeGatewayClient:
 
     async def generate(self, **kwargs: Any) -> object:
         self.calls.append(kwargs)
-        return SimpleNamespace(content=self.responses.pop(0))
+        return SimpleNamespace(
+            status=ExecutionStatus.SUCCEEDED,
+            content=self.responses.pop(0),
+            error=None,
+        )
 
     async def aclose(self) -> None:
         self.closed = True
@@ -64,7 +70,7 @@ def test_gateway_reasoner_translates_all_typed_operations_without_provider_selec
                         {
                             "id": "rollback-1",
                             "kind": "rollback_deployment",
-                            "parameters": {"target_version": "v2.30"},
+                            "parameters": [{"name": "target_version", "value": "v2.30"}],
                             "risk": "high",
                         }
                     ]
@@ -84,6 +90,131 @@ def test_gateway_reasoner_translates_all_typed_operations_without_provider_selec
         assert fake.closed
         assert all(call["workload"] == "stateops.incident.reasoning" for call in fake.calls)
         assert all("provider" not in call and "model" not in call for call in fake.calls)
+        hypotheses_schema = cast(StructuredOutputSchema, fake.calls[0]["structured_output"])
+        actions_schema = cast(StructuredOutputSchema, fake.calls[3]["structured_output"])
+        hypotheses_properties = cast(dict[str, object], hypotheses_schema.schema["properties"])
+        hypotheses_array = cast(dict[str, object], hypotheses_properties["hypotheses"])
+        assert "maxItems" not in hypotheses_array
+        actions_properties = cast(dict[str, object], actions_schema.schema["properties"])
+        actions_array = cast(dict[str, object], actions_properties["actions"])
+        assert "maxItems" not in actions_array
+        action_items = actions_array["items"]
+        action_properties = cast(dict[str, object], action_items)["properties"]
+        parameters = cast(dict[str, object], action_properties)["parameters"]
+        parameter_items = cast(dict[str, object], parameters)["items"]
+        assert cast(dict[str, object], parameter_items)["additionalProperties"] is False
+
+    asyncio.run(scenario())
+
+
+def test_gateway_reasoner_preserves_failed_terminal_metadata() -> None:
+    class FailedGatewayClient(FakeGatewayClient):
+        async def generate(self, **kwargs: Any) -> object:
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                status=ExecutionStatus.FAILED,
+                content=None,
+                error=GatewayError(
+                    code="invalid_request",
+                    message="provider rejected the schema",
+                    retryable=False,
+                ),
+            )
+
+    async def scenario() -> None:
+        reasoner = GovernedGatewayIncidentReasoner(cast(GatewayClient, FailedGatewayClient([])))
+        with pytest.raises(GatewayReasoningError) as raised:
+            await reasoner.generate_hypotheses(_incident(), _context())
+
+        assert raised.value.code == "invalid_request"
+        assert not raised.value.retryable
+
+    asyncio.run(scenario())
+
+
+def test_gateway_reasoner_marks_transport_failures_retryable() -> None:
+    class TransportFailureGatewayClient(FakeGatewayClient):
+        async def generate(self, **kwargs: Any) -> object:
+            self.calls.append(kwargs)
+            raise GatewayTransportError("gateway unavailable")
+
+    async def scenario() -> None:
+        reasoner = GovernedGatewayIncidentReasoner(
+            cast(GatewayClient, TransportFailureGatewayClient([]))
+        )
+        with pytest.raises(GatewayReasoningError) as raised:
+            await reasoner.generate_hypotheses(_incident(), _context())
+
+        assert raised.value.code == "gateway_transport_error"
+        assert raised.value.retryable
+
+    asyncio.run(scenario())
+
+
+def test_gateway_reasoner_enforces_collection_limits_after_decoding() -> None:
+    async def scenario() -> None:
+        too_many = {
+            "hypotheses": [
+                {
+                    "id": f"hyp-{index}",
+                    "title": "candidate",
+                    "rationale": "signal",
+                    "confidence": 0.5,
+                }
+                for index in range(9)
+            ]
+        }
+        reasoner = GovernedGatewayIncidentReasoner(
+            cast(GatewayClient, FakeGatewayClient([json.dumps(too_many)]))
+        )
+        with pytest.raises(GatewayReasoningError, match="between 1 and 8"):
+            await reasoner.generate_hypotheses(_incident(), _context())
+
+    asyncio.run(scenario())
+
+
+def test_gateway_reasoner_enforces_action_limits_after_decoding() -> None:
+    async def scenario() -> None:
+        too_many = {
+            "actions": [
+                {
+                    "id": f"action-{index}",
+                    "kind": "restart_service",
+                    "parameters": [],
+                    "risk": "medium",
+                }
+                for index in range(6)
+            ]
+        }
+        reasoner = GovernedGatewayIncidentReasoner(
+            cast(GatewayClient, FakeGatewayClient([json.dumps(too_many)]))
+        )
+        with pytest.raises(GatewayReasoningError, match="between 1 and 5"):
+            await reasoner.propose_remediations(_incident(), RootCause("hyp-1", "regression", 0.9))
+
+    asyncio.run(scenario())
+
+
+def test_gateway_reasoner_rejects_duplicate_action_parameter_names() -> None:
+    async def scenario() -> None:
+        response = {
+            "actions": [
+                {
+                    "id": "rollback-1",
+                    "kind": "rollback_deployment",
+                    "parameters": [
+                        {"name": "target_version", "value": "v2.30"},
+                        {"name": "target_version", "value": "v2.29"},
+                    ],
+                    "risk": "high",
+                }
+            ]
+        }
+        reasoner = GovernedGatewayIncidentReasoner(
+            cast(GatewayClient, FakeGatewayClient([json.dumps(response)]))
+        )
+        with pytest.raises(GatewayReasoningError, match="duplicate parameter names"):
+            await reasoner.propose_remediations(_incident(), RootCause("hyp-1", "regression", 0.9))
 
     asyncio.run(scenario())
 

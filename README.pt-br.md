@@ -12,6 +12,8 @@ processo, ser retomadas, reproduzidas e bifurcadas.
 
 O LLM pode raciocinar enquanto o grafo controla a execução.
 
+![StateOps Control Room mostrando um incidente resolvido](docs/assets/stateops-control-room.png)
+
 ## Por que isto é um grafo, e não uma pipeline
 
 O workflow não pode ser reduzido a uma sequência fixa de chamadas a LLMs. A investigação se expande
@@ -35,6 +37,10 @@ do design da aplicação, em vez de serem comportamentos incidentais do framewor
 - `get_state`, `get_state_history`, replay e forks controlados com `update_state`;
 - uma barreira Redis atômica com `SET NX` para remediações simuladas idempotentes;
 - streaming de estado v3, logs estruturados e OpenTelemetry opcional somente com metadados;
+- schemas de saída estruturada portáveis entre providers, com limites de coleção aplicados pela
+  aplicação;
+- falhas terminais de raciocínio modeladas como valores `WorkflowError` serializáveis e estado
+  `FAILED`;
 - um adapter de LLM para produção que conhece apenas o cliente provider-neutral do Governed LLM
   Gateway.
 
@@ -50,6 +56,7 @@ do design da aplicação, em vez de serem comportamentos incidentais do framewor
 | Decisões tipadas de atualização e rota com `Command` | [`VerificationGraph`](src/stateops/graphs/verification/graph.py) |
 | Histórico, replay, fork controlado e leitura de estado aninhado | [`GraphIncidentRuntime`](src/stateops/graphs/runtime.py) |
 | Checkpoints duráveis e desserialização restrita | [`Checkpointer Redis`](src/stateops/adapters/persistence/checkpointer.py) |
+| Estado de falha de raciocínio seguro para metadados | [`graphs/failures.py`](src/stateops/graphs/failures.py) |
 | Deduplicação atômica de efeitos | [`Ledger de remediação Redis`](src/stateops/adapters/remediation/redis_executor.py) |
 | Prova real de reinicialização e retomada | [`Teste de integração Redis`](tests/integration/test_redis_runtime.py) |
 
@@ -115,6 +122,8 @@ STATEOPS_LLM_WORKLOAD=stateops.incident.reasoning
 O Gateway/Policy Model Router externo deve autorizar esse workload em formato pontuado. O StateOps não
 presume que ele esteja autorizado e não recorre diretamente a um provider quando a solicitação é
 negada.
+Falhas terminais do Gateway são reduzidas a metadados estáveis de erro e à fase `FAILED`; exceções
+brutas do cliente ou do provider nunca são adicionadas ao estado persistido em checkpoint.
 
 ## Início rápido
 
@@ -125,7 +134,13 @@ uv sync --frozen --all-groups --extra observability
 docker compose up --build
 ```
 
-Crie um incidente:
+Abra [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) para usar o **StateOps Control
+Room**. O frontend é servido pelo próprio processo FastAPI, não usa CDN nem framework JavaScript e
+acompanha o stream de estados do LangGraph. Ele permite iniciar ou carregar uma thread, observar o
+fan-out das investigações, aprovar ou rejeitar a ação selecionada e conferir a recuperação. O botão
+**Modo captura** remove os controles de entrada e expande o painel para screenshots.
+
+Para operar a mesma demonstração pela API, crie um incidente:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/incidents \
@@ -192,6 +207,7 @@ em um nó dedicado, e a reivindicação atômica no Redis torna a reexecução s
 ## Histórico, replay, fork e streaming
 
 ```text
+GET  /ui
 GET  /incidents/{incident_id}/history
 POST /incidents/{incident_id}/replay/{checkpoint_id}
 POST /incidents/{incident_id}/fork

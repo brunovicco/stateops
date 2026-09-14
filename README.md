@@ -11,6 +11,8 @@ checkpointed. Executions can pause, survive process restart, resume, replay, and
 
 The LLM may reason while the graph controls execution.
 
+![StateOps Control Room showing a resolved incident](docs/assets/stateops-control-room.png)
+
 ## Why this is a graph rather than a pipeline
 
 The workflow cannot be reduced to a fixed sequence of LLM calls. Investigation expands dynamically
@@ -34,6 +36,8 @@ application design instead of incidental framework behavior.
 - `get_state`, `get_state_history`, replay, and controlled `update_state` forks;
 - an atomic Redis `SET NX` boundary for idempotent simulated remediations;
 - v3 state streaming, structured logs, and opt-in metadata-only OpenTelemetry;
+- provider-portable structured-output schemas with application-enforced collection bounds;
+- terminal reasoning failures modeled as serializable `WorkflowError` values and `FAILED` state;
 - a production LLM adapter that knows only the provider-neutral Governed LLM Gateway client.
 
 ## Engineering evidence map
@@ -48,6 +52,7 @@ application design instead of incidental framework behavior.
 | Typed update-and-route decisions with `Command` | [`VerificationGraph`](src/stateops/graphs/verification/graph.py) |
 | History, replay, controlled fork, and nested state reads | [`GraphIncidentRuntime`](src/stateops/graphs/runtime.py) |
 | Durable checkpoints and restricted deserialization | [`Redis checkpointer`](src/stateops/adapters/persistence/checkpointer.py) |
+| Metadata-safe reasoning failure state | [`graphs/failures.py`](src/stateops/graphs/failures.py) |
 | Atomic effect deduplication | [`Redis remediation ledger`](src/stateops/adapters/remediation/redis_executor.py) |
 | Real restart/resume proof | [`Redis integration test`](tests/integration/test_redis_runtime.py) |
 
@@ -112,6 +117,8 @@ STATEOPS_LLM_WORKLOAD=stateops.incident.reasoning
 
 The external Gateway/Policy Model Router must authorize that dotted workload. StateOps does not
 assume that it is authorized and does not fall back to a direct provider when it is denied.
+Terminal Gateway failures are reduced to stable error metadata and a `FAILED` phase; raw client or
+provider exceptions are never added to checkpoint state.
 
 ## Quick start
 
@@ -122,7 +129,13 @@ uv sync --frozen --all-groups --extra observability
 docker compose up --build
 ```
 
-Create an incident:
+Open [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) to use the **StateOps Control
+Room**. The frontend is served by the FastAPI process, uses no CDN or JavaScript framework, and
+follows the LangGraph state stream. It can start or load a thread, visualize investigation fan-out,
+approve or reject the selected action, and show the verified recovery. **Capture mode** hides the
+input controls and expands the dashboard for screenshots.
+
+To drive the same demonstration through the API, create an incident:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/incidents \
@@ -187,6 +200,7 @@ dedicated node and the atomic Redis claim makes re-execution safe.
 ## History, replay, fork, and streaming
 
 ```text
+GET  /ui
 GET  /incidents/{incident_id}/history
 POST /incidents/{incident_id}/replay/{checkpoint_id}
 POST /incidents/{incident_id}/fork
