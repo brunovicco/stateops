@@ -1,0 +1,12 @@
+{
+  "ai_systems": [
+    {
+      "id": "stateops-incident-orchestrator",
+      "intended_use": "Synthetic incident investigation, remediation planning, approval, and verification",
+      "owner": "project-owner",
+      "risk_level": "high",
+      "status": "development"
+    }
+  ],
+  "version": "1.0"
+}

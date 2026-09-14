@@ -1,0 +1,45 @@
+name: stateops
+
+services:
+  redis:
+    image: redis:8.10.1-alpine
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "stateops-local-only",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "always",
+      ]
+    environment:
+      REDISCLI_AUTH: stateops-local-only
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - stateops-redis:/data
+
+  stateops:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      REDIS_URL: redis://:stateops-local-only@redis:6379/0
+      LOG_FORMAT: json
+      STATEOPS_LLM_WORKLOAD: ${STATEOPS_LLM_WORKLOAD:-stateops.incident.reasoning}
+      STATEOPS_REASONER: ${STATEOPS_REASONER:-deterministic}
+      GOVERNED_LLM_GATEWAY_URL: ${GOVERNED_LLM_GATEWAY_URL:-}
+      GOVERNED_LLM_GATEWAY_API_KEY: ${GOVERNED_LLM_GATEWAY_API_KEY:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  stateops-redis:

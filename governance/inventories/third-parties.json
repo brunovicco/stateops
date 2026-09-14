@@ -1,0 +1,20 @@
+{
+  "third_parties": [
+    {
+      "id": "governed-llm-gateway",
+      "purpose": "Provider-neutral governed LLM execution",
+      "version_basis": "git commit 3f482dfa67484686ccc55796591713345abb93c1"
+    },
+    {
+      "id": "langgraph",
+      "purpose": "Durable state-machine runtime and checkpoint protocol",
+      "version_basis": "uv.lock"
+    },
+    {
+      "id": "redis",
+      "purpose": "Checkpoint and remediation idempotency persistence",
+      "version_basis": "compose.yaml"
+    }
+  ],
+  "version": "1.0"
+}

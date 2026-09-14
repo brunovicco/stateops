@@ -1,0 +1,14 @@
+{
+  "ai_management_scope": "StateOps synthetic agentic incident-response workflow and AI-assisted development",
+  "governance_profile": "agentic",
+  "objectives": [
+    "Maintain deterministic engineering assurance",
+    "Constrain tool and data access",
+    "Keep governance evidence reproducible and metadata-only",
+    "Require human approval and idempotency for every remediation effect",
+    "Keep production LLM execution behind the Governed LLM Gateway"
+  ],
+  "owner": "project-owner",
+  "project": "stateops",
+  "version": "1.0"
+}

@@ -1,0 +1,1 @@
+"""Dynamic investigation subgraph."""

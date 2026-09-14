@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {
+      "effect": "Synthetic allowlisted remediation only",
+      "human_approval_required": true,
+      "id": "simulated-remediation-executor",
+      "idempotent": true,
+      "owner": "project-owner"
+    }
+  ],
+  "version": "1.0"
+}

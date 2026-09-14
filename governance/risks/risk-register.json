@@ -1,0 +1,33 @@
+{
+  "risks": [
+    {
+      "decision": "mitigate",
+      "id": "RISK-STATE-001",
+      "owner": "project-owner",
+      "severity": "high",
+      "summary": "Checkpoint replay may repeat an externally visible remediation"
+    },
+    {
+      "decision": "mitigate",
+      "id": "RISK-LLM-002",
+      "owner": "project-owner",
+      "severity": "high",
+      "summary": "Untrusted model output may propose unsupported actions or parameters"
+    },
+    {
+      "decision": "mitigate",
+      "id": "RISK-DATA-003",
+      "owner": "project-owner",
+      "severity": "medium",
+      "summary": "Incident content may leak through logs, traces, or checkpoint history APIs"
+    },
+    {
+      "decision": "mitigate",
+      "id": "RISK-REDIS-004",
+      "owner": "project-owner",
+      "severity": "high",
+      "summary": "Redis eviction, persistence failure, or missing JSON/Search capabilities may make workflow checkpoints unavailable"
+    }
+  ],
+  "version": "1.0"
+}

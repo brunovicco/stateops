@@ -1,0 +1,13 @@
+{
+  "agents": [
+    {
+      "human_approval_required": true,
+      "id": "stateops-incident-state-machine",
+      "owner": "project-owner",
+      "tools": [
+        "simulated-remediation-executor"
+      ]
+    }
+  ],
+  "version": "1.0"
+}
