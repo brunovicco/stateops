@@ -243,3 +243,7 @@ credentials, and raw operational payloads must not be logged.
   routing, and execution boundary for StateOps LLM workloads.
 - [Codex Python Engineering Harness](https://github.com/brunovicco/codex-python-engineering-harness):
   engineering, architecture, quality, and governance baseline used to bootstrap this repository.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -251,3 +251,7 @@ registrados em logs.
   de políticas, roteamento e execução para os workloads de LLM do StateOps.
 - [Codex Python Engineering Harness](https://github.com/brunovicco/codex-python-engineering-harness):
   baseline de engenharia, arquitetura, qualidade e governança usado para inicializar este repositório.
+
+## Licença
+
+MIT. Consulte [LICENSE](LICENSE).
