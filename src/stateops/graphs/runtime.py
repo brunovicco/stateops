@@ -146,3 +146,4 @@ class GraphIncidentRuntime:
         async for value in stream.values:
             yield _as_mapping(value)
         await stream.output()
+        yield await self._latest(_config(incident_id))

@@ -12,6 +12,16 @@ from stateops.domain.models import (
 )
 
 
+class IncidentReasoningError(RuntimeError):
+    """Metadata-safe failure raised by an incident-reasoning implementation."""
+
+    def __init__(self, message: str, *, code: str, retryable: bool = False) -> None:
+        """Retain only stable failure metadata that is safe to checkpoint."""
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
 class IncidentReasoner(Protocol):
     """Reason about incidents without exposing model or provider selection."""
 

@@ -4,11 +4,13 @@ import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict
+from pathlib import Path
 from typing import Literal, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +27,18 @@ from stateops.application.runtime_models import RunResult
 from stateops.entrypoints.api.schemas import ApprovalRequest, CreateIncidentRequest, ForkRequest
 from stateops.graphs.incident_graph import build_incident_graph
 from stateops.graphs.runtime import GraphIncidentRuntime
+
+_UI_ROOT = Path(__file__).with_name("static")
+_UI_SECURITY_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": (
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
 
 
 class StateOpsSettings(BaseSettings):
@@ -119,6 +133,17 @@ def create_app(
         description="Durable, replayable incident-response state machine.",
         lifespan=lifespan,
     )
+    app.mount("/ui/assets", StaticFiles(directory=_UI_ROOT), name="ui-assets")
+
+    @app.get("/ui", include_in_schema=False)
+    @app.get("/ui/", include_in_schema=False)
+    async def operator_console() -> FileResponse:
+        """Serve the dependency-free local demonstration console."""
+        return FileResponse(
+            _UI_ROOT / "index.html",
+            media_type="text/html",
+            headers=_UI_SECURITY_HEADERS,
+        )
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Console visual local para demonstrar o grafo de incidentes do StateOps.">
+    <title>StateOps Control Room</title>
+    <link rel="stylesheet" href="/ui/assets/app.css">
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/ui" aria-label="StateOps Control Room">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span>
+          <strong>STATEOPS</strong>
+          <small>GRAPH CONTROL ROOM</small>
+        </span>
+      </a>
+
+      <div class="topbar-context">
+        <span class="eyebrow">THREAD</span>
+        <strong id="header-incident">NO ACTIVE INCIDENT</strong>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="health-pill" id="health-pill" data-status="checking">
+          <span class="pulse-dot"></span>
+          <span id="health-label">Verificando API</span>
+        </div>
+        <button class="ghost-button" id="capture-button" type="button" aria-pressed="false">
+          <span class="capture-icon" aria-hidden="true"></span>
+          Modo captura
+        </button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="control-panel panel" id="control-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="section-index">01 / INPUT</span>
+            <h1>Novo incidente</h1>
+          </div>
+          <button class="icon-button" id="reset-button" type="button" title="Gerar novo incidente" aria-label="Gerar novo incidente">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+
+        <p class="panel-copy">
+          Dispare uma execução real e acompanhe cada transição persistida pelo grafo.
+        </p>
+
+        <form id="incident-form">
+          <label class="field">
+            <span>Incident ID</span>
+            <input id="incident-id" name="incident_id" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,127}" required autocomplete="off">
+          </label>
+
+          <label class="field">
+            <span>Serviço</span>
+            <input id="service" name="service" value="checkout-service" required autocomplete="off">
+          </label>
+
+          <div class="field-pair">
+            <label class="field">
+              <span>Erro anterior</span>
+              <span class="input-suffix">
+                <input id="error-before" name="error_rate_before" type="number" min="0" max="100" step="0.1" value="0.2" required>
+                <b>%</b>
+              </span>
+            </label>
+            <label class="field">
+              <span>Erro atual</span>
+              <span class="input-suffix critical-input">
+                <input id="error-after" name="error_rate_after" type="number" min="0" max="100" step="0.1" value="18.0" required>
+                <b>%</b>
+              </span>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Deployment</span>
+            <input id="deployment" name="deployment" value="v2.31" required autocomplete="off">
+          </label>
+
+          <button class="primary-button" id="start-button" type="submit">
+            <span class="button-spark" aria-hidden="true">◆</span>
+            Iniciar análise
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+          <button class="secondary-button" id="load-button" type="button">
+            Carregar thread existente
+          </button>
+        </form>
+
+        <div class="runtime-note">
+          <span class="runtime-icon" aria-hidden="true">R</span>
+          <div>
+            <strong>Execução segura</strong>
+            <p>Sinais e ações são sintéticos. Checkpoints e idempotência usam Redis.</p>
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace" aria-live="polite">
+        <div class="workspace-header">
+          <div>
+            <span class="section-index">02 / STATE MACHINE</span>
+            <div class="title-row">
+              <h2>Incident execution graph</h2>
+              <span class="phase-badge" id="phase-badge" data-phase="idle">IDLE</span>
+            </div>
+          </div>
+          <div class="workspace-meta">
+            <div><span>SEVERITY</span><strong id="severity-value">—</strong></div>
+            <div><span>CHECKPOINTS</span><strong id="checkpoint-value">0</strong></div>
+            <div><span>ATTEMPT</span><strong id="attempt-value">0</strong></div>
+          </div>
+        </div>
+
+        <section class="graph-panel panel" aria-label="Fluxo do grafo">
+          <div class="graph-track" id="graph-track">
+            <article class="graph-node" data-node="intake">
+              <span class="node-number">01</span>
+              <span class="node-icon">↗</span>
+              <strong>INTAKE</strong>
+              <small>enrich + classify</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node" data-node="hypotheses">
+              <span class="node-number">02</span>
+              <span class="node-icon">◇</span>
+              <strong>HYPOTHESES</strong>
+              <small>structured output</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node parallel-node" data-node="investigate">
+              <span class="node-number">03</span>
+              <span class="node-icon">⌘</span>
+              <strong>FAN-OUT</strong>
+              <small>Send × <b id="branch-count">0</b></small>
+              <div class="branch-dots" id="branch-dots" aria-label="Ramos de investigação"></div>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node" data-node="synthesize">
+              <span class="node-number">04</span>
+              <span class="node-icon">≡</span>
+              <strong>REDUCE</strong>
+              <small>evidence synthesis</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node" data-node="plan">
+              <span class="node-number">05</span>
+              <span class="node-icon">△</span>
+              <strong>PLAN</strong>
+              <small>select action</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node gate-node" data-node="approval">
+              <span class="node-number">06</span>
+              <span class="node-icon">Ⅱ</span>
+              <strong>HUMAN GATE</strong>
+              <small>interrupt</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node" data-node="execute">
+              <span class="node-number">07</span>
+              <span class="node-icon">▷</span>
+              <strong>EXECUTE</strong>
+              <small>idempotent effect</small>
+            </article>
+            <span class="graph-edge" aria-hidden="true"></span>
+            <article class="graph-node" data-node="verify">
+              <span class="node-number">08</span>
+              <span class="node-icon">✓</span>
+              <strong>VERIFY</strong>
+              <small>Command route</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="approval-panel panel" id="approval-panel" hidden>
+          <div class="approval-signal" aria-hidden="true">!</div>
+          <div class="approval-copy">
+            <span>HUMAN-IN-THE-LOOP</span>
+            <h3>A execução está pausada</h3>
+            <p id="approval-description">Uma decisão humana é necessária para continuar.</p>
+          </div>
+          <div class="approval-actions">
+            <button class="reject-button" id="reject-button" type="button">Rejeitar</button>
+            <button class="approve-button" id="approve-button" type="button">
+              Aprovar ação <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="metrics-grid">
+          <article class="metric-card panel">
+            <div class="metric-label"><span>ERROR RATE</span><b>LIVE</b></div>
+            <div class="metric-values">
+              <strong id="current-error">—</strong>
+              <span class="metric-delta" id="error-delta">NO SIGNAL</span>
+            </div>
+            <div class="sparkline" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </article>
+
+          <article class="metric-card panel">
+            <div class="metric-label"><span>PARALLEL BRANCHES</span><b>SEND</b></div>
+            <div class="metric-values">
+              <strong id="hypothesis-count">0</strong>
+              <span class="metric-delta neutral" id="evidence-count">0 EVIDENCES</span>
+            </div>
+            <div class="branch-meter" id="branch-meter" aria-hidden="true"></div>
+          </article>
+
+          <article class="metric-card panel">
+            <div class="metric-label"><span>ROOT CAUSE CONFIDENCE</span><b>LLM</b></div>
+            <div class="metric-values">
+              <strong id="confidence-value">—</strong>
+              <span class="metric-delta neutral" id="root-hypothesis">PENDING</span>
+            </div>
+            <div class="confidence-track"><span id="confidence-fill"></span></div>
+          </article>
+        </section>
+
+        <section class="details-grid">
+          <article class="detail-card panel root-cause-card">
+            <div class="card-heading">
+              <div>
+                <span class="section-index">03 / REASONING</span>
+                <h3>Root cause</h3>
+              </div>
+              <span class="card-status" id="reasoning-status">PENDING</span>
+            </div>
+            <p class="detail-summary muted" id="root-summary">
+              Inicie um incidente para visualizar a síntese das evidências produzidas pelos ramos.
+            </p>
+            <div class="evidence-strip" id="evidence-strip"></div>
+          </article>
+
+          <article class="detail-card panel action-card">
+            <div class="card-heading">
+              <div>
+                <span class="section-index">04 / DECISION</span>
+                <h3>Selected action</h3>
+              </div>
+              <span class="risk-badge" id="risk-badge">—</span>
+            </div>
+            <div class="action-empty" id="action-empty">
+              <span>△</span>
+              <p>Nenhuma ação selecionada</p>
+            </div>
+            <div id="action-content" hidden>
+              <strong class="action-name" id="action-name">—</strong>
+              <dl class="parameter-list" id="parameter-list"></dl>
+            </div>
+          </article>
+
+          <article class="detail-card panel timeline-card">
+            <div class="card-heading">
+              <div>
+                <span class="section-index">05 / AUDIT TRAIL</span>
+                <h3>State timeline</h3>
+              </div>
+              <span class="live-indicator"><i></i> LIVE</span>
+            </div>
+            <ol class="timeline-list" id="timeline-list">
+              <li class="timeline-empty">Os eventos aparecerão durante a execução.</li>
+            </ol>
+          </article>
+        </section>
+
+        <section class="outcome-panel panel" id="outcome-panel" hidden>
+          <div class="outcome-check" aria-hidden="true">✓</div>
+          <div>
+            <span>WORKFLOW COMPLETE</span>
+            <h3>Incident resolved</h3>
+            <p id="outcome-description">A ação foi executada e a recuperação foi confirmada.</p>
+          </div>
+          <div class="outcome-metrics">
+            <div><span>BEFORE</span><strong id="outcome-before">—</strong></div>
+            <span class="outcome-arrow">→</span>
+            <div><span>AFTER</span><strong id="outcome-after">—</strong></div>
+          </div>
+        </section>
+
+        <p class="status-message" id="status-message" role="status"></p>
+      </section>
+    </main>
+  </body>
+</html>
